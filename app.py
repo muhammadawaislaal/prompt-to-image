@@ -4,11 +4,10 @@ from PIL import Image
 import io
 import os
 import time
-import base64
 
 # Page configuration
 st.set_page_config(
-    page_title="Professional AI Image Generator",
+    page_title="Free AI Image Generator",
     page_icon="🖼️",
     layout="wide"
 )
@@ -75,6 +74,14 @@ st.markdown("""
             margin: 1rem 0;
             border-left: 5px solid #10b981;
         }
+        .error-box {
+            background: linear-gradient(135deg, #7f1d1d, #991b1b);
+            color: #fecaca;
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            border-left: 5px solid #ef4444;
+        }
         .info-box {
             background: linear-gradient(135deg, #1e3a8a, #3730a3);
             color: #dbeafe;
@@ -90,45 +97,61 @@ st.markdown("""
             margin: 0.5rem 0;
             border-left: 4px solid #8b5cf6;
         }
+        .token-status {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            margin: 0.5rem 0;
+            font-weight: bold;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-def generate_with_huggingface_free(prompt, model_name):
-    """Generate image using Hugging Face FREE inference API"""
+def test_huggingface_token(token):
+    """Test if Hugging Face token is valid"""
     try:
-        # FREE models that actually work without payment
-        free_models = {
-            "black-forest-labs/FLUX.1-schnell": {
-                "url": "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
-                "requires_token": False
+        # Test with a simple API call
+        test_url = "https://huggingface.co/api/whoami"
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(test_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            user_info = response.json()
+            return True, f"✅ Token valid - Welcome {user_info.get('name', 'User')}!"
+        elif response.status_code == 401:
+            return False, "❌ Invalid token"
+        else:
+            return False, f"❌ Error {response.status_code}"
+            
+    except Exception as e:
+        return False, f"❌ Connection error: {str(e)}"
+
+def generate_with_huggingface_api(prompt, token, model_name):
+    """Generate image using Hugging Face API with token"""
+    try:
+        # Models that work with free API tokens
+        models = {
+            "runwayml/stable-diffusion-v1-5": {
+                "url": "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
             },
-            "dataautogpt3/OpenDalleV1.1": {
-                "url": "https://api-inference.huggingface.co/models/dataautogpt3/OpenDalleV1.1", 
-                "requires_token": False
+            "stabilityai/stable-diffusion-2-1": {
+                "url": "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
             },
-            "stabilityai/stable-diffusion-xl-base-1.0": {
-                "url": "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
-                "requires_token": False
+            "prompthero/openjourney": {
+                "url": "https://api-inference.huggingface.co/models/prompthero/openjourney"
             }
         }
         
-        model_info = free_models.get(model_name)
-        if not model_info:
-            return None, f"Model {model_name} not found"
+        if model_name not in models:
+            return None, "Model not found"
         
-        API_URL = model_info["url"]
+        API_URL = models[model_name]["url"]
+        headers = {"Authorization": f"Bearer {token}"}
         
-        # Use token if available, but these models work without token
-        headers = {}
-        token = os.getenv('HF_TOKEN', '')
-        if token and model_info["requires_token"]:
-            headers = {"Authorization": f"Bearer {token}"}
-        
-        # Optimized payload for better quality
+        # Enhanced payload for better quality
         payload = {
             "inputs": prompt,
             "parameters": {
-                "num_inference_steps": 20,
+                "num_inference_steps": 25,
                 "guidance_scale": 7.5,
                 "width": 512,
                 "height": 512
@@ -139,46 +162,52 @@ def generate_with_huggingface_free(prompt, model_name):
             }
         }
         
-        # Make request with timeout
+        # Make the API request
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         
         if response.status_code == 200:
             image = Image.open(io.BytesIO(response.content))
-            return image, f"Success with {model_name}"
+            return image, "success"
         
         elif response.status_code == 503:
             # Model is loading
             try:
                 error_data = response.json()
                 estimated_time = error_data.get('estimated_time', 30)
-                return None, f"Model is loading. Wait {int(estimated_time)} seconds."
+                return None, f"Model loading... Wait {estimated_time:.0f}s"
             except:
-                return None, "Model loading. Please wait."
+                return None, "Model loading. Please wait..."
+        
+        elif response.status_code == 401:
+            return None, "Invalid token"
+        
+        elif response.status_code == 402:
+            return None, "Payment required - upgrade account"
         
         else:
-            return None, f"API Error {response.status_code}. Try another model."
+            return None, f"API Error {response.status_code}"
             
+    except requests.exceptions.Timeout:
+        return None, "Timeout - Try again"
     except Exception as e:
         return None, f"Error: {str(e)}"
 
-def enhance_prompt(base_prompt, style):
-    """Enhance the prompt for better results"""
-    style_enhancements = {
-        "realistic": "photorealistic, highly detailed, professional photography, sharp focus, 8K resolution",
-        "fantasy": "fantasy art, magical, epic, concept art, digital painting, trending on artstation",
-        "anime": "anime style, Japanese animation, vibrant colors, detailed, masterpiece",
-        "digital_art": "digital artwork, illustrative, vivid colors, detailed, trending on artstation",
-        "cinematic": "cinematic, dramatic lighting, film still, movie quality, depth of field"
+def enhance_prompt_for_model(prompt, model_name):
+    """Enhance prompt based on model type"""
+    enhancements = {
+        "runwayml/stable-diffusion-v1-5": "high quality, detailed, professional",
+        "stabilityai/stable-diffusion-2-1": "high quality, sharp focus, detailed",
+        "prompthero/openjourney": "mdjrny-v4 style, vibrant, detailed"
     }
     
-    enhancement = style_enhancements.get(style, "high quality, detailed, professional")
-    return f"{base_prompt}, {enhancement}"
+    enhancement = enhancements.get(model_name, "high quality, detailed")
+    return f"{prompt}, {enhancement}"
 
 # Header Section
 st.markdown("""
     <div class="header">
-        <h1>🎨 Professional AI Image Generator</h1>
-        <p>High-Quality Images Using Free Hugging Face Models</p>
+        <h1>🎨 Free AI Image Generator</h1>
+        <p>Using Hugging Face API Key - High Quality Images</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -186,48 +215,71 @@ st.markdown("""
 with st.container():
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     
-    st.markdown("""
-    <div class="info-box">
-        <h3>🚀 High-Quality Free Models</h3>
-        <p>These models produce <strong>realistic, high-quality images</strong> and are completely free to use!</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # API Key Section
+    st.subheader("🔑 Hugging Face API Key")
+    
+    # Get token from secrets or input
+    token_from_secrets = os.getenv('HF_TOKEN', '')
+    
+    if token_from_secrets:
+        st.success("✅ API Key found in Streamlit secrets!")
+        hf_token = token_from_secrets
+        is_valid, token_message = test_huggingface_token(hf_token)
+        
+        if is_valid:
+            st.markdown(f'<div class="success-box">{token_message}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="error-box">{token_message}</div>', unsafe_allow_html=True)
+            st.stop()
+    else:
+        st.warning("No API key in secrets. Enter your Hugging Face token:")
+        manual_token = st.text_input("Hugging Face Token:", type="password")
+        
+        if manual_token:
+            hf_token = manual_token
+            is_valid, token_message = test_huggingface_token(hf_token)
+            
+            if is_valid:
+                st.markdown(f'<div class="success-box">{token_message}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="error-box">{token_message}</div>', unsafe_allow_html=True)
+                st.stop()
+        else:
+            st.info("💡 Get free token from: https://huggingface.co/settings/tokens")
+            st.stop()
+    
+    st.markdown("---")
+    
+    # Image Generation Section
+    st.subheader("🎨 Create Your Image")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         prompt = st.text_area(
             "Enter your prompt:",
-            placeholder="A realistic photo of a majestic dragon flying over misty mountains at sunset, highly detailed, 8K resolution",
+            placeholder="A majestic dragon flying over misty mountains at sunset, fantasy art, highly detailed",
             height=100,
             key="prompt"
         )
         
         # Model selection
-        st.markdown("### 🎯 Select AI Model")
+        st.markdown("### 🤖 Select Model")
         model_choice = st.selectbox(
-            "Choose model:",
+            "Choose AI model:",
             [
-                "black-forest-labs/FLUX.1-schnell",
-                "dataautogpt3/OpenDalleV1.1", 
-                "stabilityai/stable-diffusion-xl-base-1.0"
+                "runwayml/stable-diffusion-v1-5",
+                "stabilityai/stable-diffusion-2-1", 
+                "prompthero/openjourney"
             ],
-            help="FLUX.1-schnell: Fast & high quality, OpenDalle: Good for creative images, SDXL: Balanced quality"
-        )
-        
-        # Style enhancement
-        st.markdown("### 🎨 Image Style")
-        style_choice = st.selectbox(
-            "Enhance with style:",
-            ["realistic", "fantasy", "cinematic", "digital_art", "anime"],
-            help="This will enhance your prompt for better results"
+            help="SD 1.5: Good all-rounder, SD 2.1: Better quality, OpenJourney: Artistic style"
         )
         
         # Show model info
         model_info = {
-            "black-forest-labs/FLUX.1-schnell": "🌟 **Best Choice** - Fast generation, high quality, realistic images",
-            "dataautogpt3/OpenDalleV1.1": "🎨 Creative images, good for fantasy and artistic styles", 
-            "stabilityai/stable-diffusion-xl-base-1.0": "🖼️ Balanced quality, reliable results"
+            "runwayml/stable-diffusion-v1-5": "🔄 **Most Reliable** - Good for all image types",
+            "stabilityai/stable-diffusion-2-1": "🌟 **Higher Quality** - Better details and resolution", 
+            "prompthero/openjourney": "🎨 **Artistic Style** - Great for fantasy and creative images"
         }
         
         st.markdown(f'<div class="model-card">{model_info[model_choice]}</div>', unsafe_allow_html=True)
@@ -235,143 +287,122 @@ with st.container():
     with col2:
         st.markdown("### 💡 Pro Tips")
         st.markdown("""
-        **For REALISTIC images:**
-        • Start with "A realistic photo of..."
-        • Add "highly detailed, 8K resolution"
-        • Specify lighting: "dramatic lighting, golden hour"
-        • Mention camera: "professional photography"
+        **For BEST results:**
+        • Be descriptive and specific
+        • Include style keywords
+        • Mention lighting and mood
+        • Add quality terms
         
-        **Example:**
-        "A realistic photo of a dragon flying over mountains at sunset, highly detailed, 8K resolution, professional photography, dramatic lighting"
+        **Great prompts:**
+        - Majestic dragon flying over misty mountains, fantasy art, highly detailed, dramatic lighting
+        - Cyberpunk city at night, neon lights, futuristic, cinematic
+        - Beautiful landscape sunset, professional photography, 8K
         """)
         
-        st.markdown("### ⚡ Quick Presets")
-        if st.button("🏔️ Realistic Landscape"):
-            st.session_state.prompt = "A realistic photo of majestic mountains at sunrise, misty valleys, dramatic lighting, professional landscape photography, 8K resolution"
-        
+        st.markdown("### ⚡ Quick Templates")
         if st.button("🐉 Fantasy Dragon"):
-            st.session_state.prompt = "A realistic photo of a majestic dragon flying over misty mountains at golden hour, highly detailed scales, dramatic lighting, fantasy art, 8K resolution"
+            st.session_state.prompt = "A majestic dragon flying over misty mountains at golden hour, fantasy art, highly detailed, epic scale"
         
-        if st.button("🌃 Cyberpunk City"):
-            st.session_state.prompt = "A realistic photo of a cyberpunk city at night, neon lights, flying cars, futuristic architecture, cinematic lighting, 8K resolution"
+        if st.button("🌅 Landscape"):
+            st.session_state.prompt = "Beautiful mountain landscape at sunrise, misty valleys, professional photography, highly detailed"
+        
+        if st.button("🤖 Sci-Fi"):
+            st.session_state.prompt = "Futuristic cyberpunk city at night, neon lights, flying cars, detailed architecture, cinematic"
     
     # Generate button
-    if st.button("🚀 Generate High-Quality Image", use_container_width=True, type="primary"):
+    if st.button("🚀 Generate Image with API", use_container_width=True, type="primary"):
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
         else:
-            # Enhance the prompt
-            enhanced_prompt = enhance_prompt(prompt, style_choice)
+            # Enhance prompt
+            enhanced_prompt = enhance_prompt_for_model(prompt, model_choice)
             
-            with st.spinner(f"🔄 Generating high-quality image with {model_choice}... (30-60 seconds)"):
+            with st.spinner(f"🔄 Generating image with {model_choice}..."):
                 # Show progress
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                for i in range(5):
-                    progress_bar.progress((i + 1) * 20)
+                for i in range(4):
+                    progress_bar.progress((i + 1) * 25)
                     if i == 0:
-                        status_text.text("📝 Enhancing your prompt...")
+                        status_text.text("📝 Processing prompt...")
                     elif i == 1:
-                        status_text.text("🔧 Initializing AI model...")
+                        status_text.text("🔗 Connecting to API...")
                     elif i == 2:
                         status_text.text("🎨 Generating image...")
-                    elif i == 3:
-                        status_text.text("✨ Adding final details...")
                     time.sleep(1)
                 
                 # Generate image
-                generated_image, message = generate_with_huggingface_free(enhanced_prompt, model_choice)
+                generated_image, message = generate_with_huggingface_api(enhanced_prompt, hf_token, model_choice)
                 
                 progress_bar.progress(100)
-                status_text.text("✅ Complete!")
-                time.sleep(1)
-                progress_bar.empty()
-                status_text.empty()
                 
                 if generated_image:
-                    st.markdown(f'<div class="success-box">🎉 High-quality image generated successfully!</div>', unsafe_allow_html=True)
+                    status_text.text("✅ Image generated!")
+                    time.sleep(1)
+                    progress_bar.empty()
+                    status_text.empty()
                     
-                    # Show original vs enhanced prompt
-                    with st.expander("📝 See enhanced prompt"):
-                        st.write(f"**Original:** {prompt}")
-                        st.write(f"**Enhanced:** {enhanced_prompt}")
+                    st.markdown('<div class="success-box">🎉 High-quality image created successfully!</div>', unsafe_allow_html=True)
                     
                     # Display image
-                    st.image(generated_image, use_container_width=True, caption=f"'{prompt}' - Generated with {model_choice.split('/')[-1]}")
+                    st.image(generated_image, use_container_width=True, caption=f"'{prompt}'")
                     
                     # Download button
                     buf = io.BytesIO()
                     generated_image.save(buf, format="PNG", quality=95)
                     st.download_button(
-                        label="📥 Download High-Quality Image",
+                        label="📥 Download Image",
                         data=buf.getvalue(),
-                        file_name=f"professional_ai_image_{int(time.time())}.png",
+                        file_name=f"ai_image_{int(time.time())}.png",
                         mime="image/png",
                         use_container_width=True
                     )
                     
                     st.balloons()
                     
-                    # Success tips
-                    st.info("""
-                    **✅ Success! Tips for even better results:**
-                    - Try different models for varied styles
-                    - Use the 'realistic' style for photorealistic images  
-                    - Be very specific in your descriptions
-                    - Mention lighting and camera details
-                    """)
-                
                 else:
-                    st.error(f"❌ {message}")
+                    status_text.text("❌ Failed")
+                    time.sleep(1)
+                    progress_bar.empty()
+                    status_text.empty()
                     
-                    # Troubleshooting guide
-                    with st.expander("🔧 Troubleshooting Guide"):
-                        st.markdown("""
-                        **If generation fails:**
-                        1. **Wait 1 minute** - models might be loading
-                        2. **Try a different model** - FLUX.1-schnell is most reliable
-                        3. **Simplify your prompt** - remove very specific details
-                        4. **Check internet connection**
-                        5. **Try again in 2 minutes** - free tier might have rate limits
-                        
-                        **Best model order:**
-                        1. FLUX.1-schnell (fastest & highest quality)
-                        2. OpenDalleV1.1 (good for creative)
-                        3. SDXL (reliable backup)
-                        """)
+                    st.markdown(f'<div class="error-box">❌ {message}</div>', unsafe_allow_html=True)
+                    
+                    # Solutions based on error
+                    if "loading" in message.lower():
+                        st.info("🔄 **Solution:** Wait 30-60 seconds and try again. The model is loading.")
+                    elif "payment" in message.lower():
+                        st.error("💳 **Solution:** This model requires payment. Try 'runwayml/stable-diffusion-v1-5' instead.")
+                    elif "token" in message.lower():
+                        st.error("🔑 **Solution:** Check your API token is correct and has inference permissions.")
+                    else:
+                        st.info("🔄 **Solution:** Try a different model or wait a few minutes.")
     
-    # Model information section
+    # Free API Information
     st.markdown("---")
-    st.markdown("### 🏆 Recommended Models")
+    st.markdown("### 🆓 Free Hugging Face API")
     
-    col3, col4, col5 = st.columns(3)
+    col3, col4 = st.columns(2)
     
     with col3:
         st.markdown("""
-        **🌟 FLUX.1-schnell**
-        - Highest quality free model
-        - Fast generation (15-30s)
-        - Great for realistic images
-        - Minimal loading time
+        **✅ What's FREE:**
+        - Unlimited image generation
+        - No credit card required
+        - Multiple AI models
+        - High quality 512x512 images
+        - No watermarks
         """)
     
     with col4:
         st.markdown("""
-        **🎨 OpenDalleV1.1** 
-        - Excellent for creative art
-        - Good fantasy & anime
-        - Reliable free access
-        - Fast responses
-        """)
-    
-    with col5:
-        st.markdown("""
-        **🖼️ Stable Diffusion XL**
-        - Most stable model
-        - Consistent results
-        - Good all-rounder
-        - Rarely busy
+        **🔑 Get API Token:**
+        1. Go to huggingface.co
+        2. Create free account
+        3. Settings → Access Tokens
+        4. Create new token (read permission)
+        5. Add to Streamlit secrets as HF_TOKEN
         """)
     
     st.markdown('</div>', unsafe_allow_html=True)
@@ -379,6 +410,6 @@ with st.container():
 # Footer
 st.markdown("""
     <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
-        <p>Powered by Hugging Face Free Inference API | Professional Quality Images</p>
+        <p>Powered by Hugging Face Inference API | Free & High Quality</p>
     </div>
 """, unsafe_allow_html=True)
