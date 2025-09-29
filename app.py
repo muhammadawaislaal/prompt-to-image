@@ -90,21 +90,42 @@ st.markdown("""
             margin: 1rem 0;
             border-left: 5px solid #4f46e5;
         }
+        .token-test {
+            background: #374151;
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid #4b5563;
+            margin: 1rem 0;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-def generate_image_huggingface(prompt):
-    """
-    Generate image using Hugging Face Inference API
-    Returns PIL Image if successful, None otherwise
-    """
+def test_huggingface_token(token):
+    """Test if the Hugging Face token is valid"""
     try:
-        # Your Hugging Face token from Streamlit secrets
-        HF_TOKEN = os.getenv('HF_TOKEN', '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')
+        # Test with a simple model info request
+        test_url = "https://huggingface.co/api/models/runwayml/stable-diffusion-v1-5"
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(test_url, headers=headers, timeout=10)
         
+        if response.status_code == 200:
+            return True, "✅ Token is valid!"
+        elif response.status_code == 401:
+            return False, "❌ Invalid token - Unauthorized"
+        elif response.status_code == 403:
+            return False, "❌ Token doesn't have inference access"
+        else:
+            return False, f"❌ Token test failed with status {response.status_code}"
+            
+    except Exception as e:
+        return False, f"❌ Connection error: {str(e)}"
+
+def generate_image_huggingface(prompt, token):
+    """Generate image using Hugging Face Inference API"""
+    try:
         # API endpoint for Stable Diffusion
         API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        headers = {"Authorization": f"Bearer {token}"}
         
         # Payload for the API request
         payload = {
@@ -126,42 +147,29 @@ def generate_image_huggingface(prompt):
         
         # Check response status
         if response.status_code == 200:
-            return Image.open(io.BytesIO(response.content))
+            return Image.open(io.BytesIO(response.content)), "success"
         
         elif response.status_code == 503:
             # Model is loading
             error_data = response.json()
             estimated_time = error_data.get('estimated_time', 30)
-            st.error(f"🔄 Model is loading. Please wait {int(estimated_time)} seconds and try again.")
-            return None
+            return None, f"Model is loading. Please wait {int(estimated_time)} seconds and try again."
             
         elif response.status_code == 403:
-            st.error("🔐 Access denied. Please check your Hugging Face token.")
-            return None
+            return None, "Access denied. Please check your Hugging Face token."
             
         elif response.status_code == 429:
-            st.error("⏳ Rate limit exceeded. Please wait a few minutes before trying again.")
-            return None
+            return None, "Rate limit exceeded. Please wait a few minutes before trying again."
             
         else:
-            st.error(f"❌ API Error {response.status_code}: {response.text}")
-            return None
+            return None, f"API Error {response.status_code}: {response.text}"
             
     except requests.exceptions.Timeout:
-        st.error("⏰ Request timeout. The model is taking too long to respond.")
-        return None
+        return None, "Request timeout. The model is taking too long to respond."
     except requests.exceptions.ConnectionError:
-        st.error("🌐 Connection error. Please check your internet connection.")
-        return None
+        return None, "Connection error. Please check your internet connection."
     except Exception as e:
-        st.error(f"⚠️ Unexpected error: {str(e)}")
-        return None
-
-def create_placeholder(prompt):
-    """Create a professional placeholder image"""
-    width, height = 512, 512
-    img = Image.new('RGB', (width, height), color='#1f2937')
-    return img
+        return None, f"Unexpected error: {str(e)}"
 
 # Header Section
 st.markdown("""
@@ -175,56 +183,71 @@ st.markdown("""
 with st.container():
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     
+    # Token Verification Section
+    st.subheader("🔐 Token Verification")
+    
+    # Get token from secrets
+    current_token = os.getenv('HF_TOKEN', '')
+    
+    if current_token:
+        st.write("Current token found in secrets. Testing...")
+        is_valid, message = test_huggingface_token(current_token)
+        
+        if is_valid:
+            st.markdown(f'<div class="success-box">{message}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
+            st.error("Please add a new valid Hugging Face token to Streamlit secrets.")
+    else:
+        st.markdown('<div class="error-box">❌ No HF_TOKEN found in secrets</div>', unsafe_allow_html=True)
+    
+    # Manual token input for testing (optional)
+    with st.expander("🔧 Manual Token Test (Optional)"):
+        manual_token = st.text_input("Enter a token to test:", type="password")
+        if manual_token:
+            is_valid, message = test_huggingface_token(manual_token)
+            if is_valid:
+                st.success(message)
+                st.info("If this token works, add it to your Streamlit secrets!")
+            else:
+                st.error(message)
+    
+    st.markdown("---")
+    
+    # Image Generation Section
+    st.subheader("🎨 Create Your Image")
+    
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("Create Your Image")
         prompt = st.text_area(
             "Enter your prompt:",
             placeholder="Describe the image you want to generate...",
             height=120,
             key="prompt"
         )
-        
-        # Advanced options
-        with st.expander("Advanced Settings"):
-            model_choice = st.selectbox(
-                "Model",
-                ["runwayml/stable-diffusion-v1-5", "stabilityai/stable-diffusion-2-1"],
-                help="Choose the AI model for image generation"
-            )
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                steps = st.slider("Inference Steps", 10, 50, 25)
-            with col_b:
-                guidance = st.slider("Guidance Scale", 5.0, 15.0, 7.5)
     
     with col2:
-        st.subheader("Guide")
         st.markdown("""
         **Tips for best results:**
         - Be specific and descriptive
         - Include style references
         - Mention composition details
         - Specify lighting and mood
-        """)
         
-        st.markdown("""
-        **Example prompts:**
-        - Photorealistic portrait of a wise old wizard
-        - Cyberpunk cityscape at night with neon lights
-        - Serene mountain landscape at sunrise
+        **Example:**
+        "A majestic dragon flying over misty mountains at sunset, fantasy art style"
         """)
     
     # Generate button
     if st.button("🚀 Generate Image", use_container_width=True):
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
+        elif not current_token:
+            st.error("No Hugging Face token configured. Please add HF_TOKEN to Streamlit secrets.")
         else:
             with st.spinner("🔄 Generating your image... This may take 20-30 seconds."):
-                # Update payload with advanced settings
-                generated_image = generate_image_huggingface(prompt)
+                generated_image, message = generate_image_huggingface(prompt, current_token)
                 
                 if generated_image:
                     st.markdown('<div class="success-box">✅ Image generated successfully!</div>', unsafe_allow_html=True)
@@ -243,22 +266,7 @@ with st.container():
                         use_container_width=True
                     )
                 else:
-                    st.markdown('<div class="error-box">❌ Failed to generate image. Please try again.</div>', unsafe_allow_html=True)
-                    
-                    # Show placeholder
-                    placeholder = create_placeholder(prompt)
-                    st.image(placeholder, use_container_width=True)
-                    
-                    # Troubleshooting guide
-                    with st.expander("Troubleshooting Guide"):
-                        st.markdown("""
-                        **Common solutions:**
-                        1. Check your Hugging Face token is valid
-                        2. Ensure you have internet connection
-                        3. Try a different prompt
-                        4. Wait a few minutes if rate limited
-                        5. Contact support if issue persists
-                        """)
+                    st.markdown(f'<div class="error-box">❌ {message}</div>', unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
