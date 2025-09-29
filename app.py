@@ -90,12 +90,12 @@ st.markdown("""
             margin: 1rem 0;
             border-left: 5px solid #4f46e5;
         }
-        .token-test {
+        .model-info {
             background: #374151;
             padding: 1rem;
             border-radius: 10px;
-            border: 1px solid #4b5563;
             margin: 1rem 0;
+            border-left: 4px solid #8b5cf6;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -120,11 +120,18 @@ def test_huggingface_token(token):
     except Exception as e:
         return False, f"❌ Connection error: {str(e)}"
 
-def generate_image_huggingface(prompt, token):
+def generate_image_huggingface(prompt, token, model_choice):
     """Generate image using Hugging Face Inference API"""
     try:
-        # API endpoint for Stable Diffusion
-        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+        # Use models that work with free tokens
+        models = {
+            "CompVis/stable-diffusion-v1-4": "https://api-inference.huggingface.co/models/CompVis/stable-diffusion-v1-4",
+            "runwayml/stable-diffusion-v1-5": "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
+            "prompthero/openjourney": "https://api-inference.huggingface.co/models/prompthero/openjourney",
+            "wavymulder/Analog-Diffusion": "https://api-inference.huggingface.co/models/wavymulder/Analog-Diffusion"
+        }
+        
+        API_URL = models.get(model_choice, models["prompthero/openjourney"])
         headers = {"Authorization": f"Bearer {token}"}
         
         # Payload for the API request
@@ -133,17 +140,11 @@ def generate_image_huggingface(prompt, token):
             "options": {
                 "wait_for_model": True,
                 "use_cache": True
-            },
-            "parameters": {
-                "num_inference_steps": 25,
-                "guidance_scale": 7.5,
-                "width": 512,
-                "height": 512
             }
         }
         
-        # Make the API request with timeout
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        # Make the API request with longer timeout
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         
         # Check response status
         if response.status_code == 200:
@@ -152,24 +153,25 @@ def generate_image_huggingface(prompt, token):
         elif response.status_code == 503:
             # Model is loading
             error_data = response.json()
-            estimated_time = error_data.get('estimated_time', 30)
-            return None, f"Model is loading. Please wait {int(estimated_time)} seconds and try again."
+            estimated_time = error_data.get('estimated_time', 45)
+            return None, f"🔄 Model is loading. Please wait {int(estimated_time)} seconds and try again."
             
         elif response.status_code == 403:
-            return None, "Access denied. Please check your Hugging Face token."
+            return None, f"🔐 Access denied for {model_choice}. The model may require payment or special access."
             
         elif response.status_code == 429:
-            return None, "Rate limit exceeded. Please wait a few minutes before trying again."
+            return None, "⏳ Rate limit exceeded. Please wait a few minutes before trying again."
             
         else:
-            return None, f"API Error {response.status_code}: {response.text}"
+            error_text = response.text[:200]  # Limit error text length
+            return None, f"❌ API Error {response.status_code}: {error_text}"
             
     except requests.exceptions.Timeout:
-        return None, "Request timeout. The model is taking too long to respond."
+        return None, "⏰ Request timeout. The model is taking too long to respond. Try a different model."
     except requests.exceptions.ConnectionError:
-        return None, "Connection error. Please check your internet connection."
+        return None, "🌐 Connection error. Please check your internet connection."
     except Exception as e:
-        return None, f"Unexpected error: {str(e)}"
+        return None, f"⚠️ Unexpected error: {str(e)}"
 
 # Header Section
 st.markdown("""
@@ -197,20 +199,8 @@ with st.container():
             st.markdown(f'<div class="success-box">{message}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
-            st.error("Please add a new valid Hugging Face token to Streamlit secrets.")
     else:
         st.markdown('<div class="error-box">❌ No HF_TOKEN found in secrets</div>', unsafe_allow_html=True)
-    
-    # Manual token input for testing (optional)
-    with st.expander("🔧 Manual Token Test (Optional)"):
-        manual_token = st.text_input("Enter a token to test:", type="password")
-        if manual_token:
-            is_valid, message = test_huggingface_token(manual_token)
-            if is_valid:
-                st.success(message)
-                st.info("If this token works, add it to your Streamlit secrets!")
-            else:
-                st.error(message)
     
     st.markdown("---")
     
@@ -222,21 +212,48 @@ with st.container():
     with col1:
         prompt = st.text_area(
             "Enter your prompt:",
-            placeholder="Describe the image you want to generate...",
+            placeholder="A majestic dragon flying over misty mountains at sunset, fantasy art style",
             height=120,
             key="prompt"
         )
+        
+        # Model selection
+        st.markdown("### 🎯 Model Selection")
+        model_choice = st.selectbox(
+            "Choose AI Model:",
+            [
+                "prompthero/openjourney",
+                "wavymulder/Analog-Diffusion", 
+                "CompVis/stable-diffusion-v1-4",
+                "runwayml/stable-diffusion-v1-5"
+            ],
+            help="Some models may require payment. OpenJourney and Analog Diffusion work best with free tokens."
+        )
+        
+        # Show model info
+        model_info = {
+            "prompthero/openjourney": "🎨 Best for artistic and fantasy images",
+            "wavymulder/Analog-Diffusion": "📸 Film photography style",
+            "CompVis/stable-diffusion-v1-4": "🖼️ Original Stable Diffusion",
+            "runwayml/stable-diffusion-v1-5": "🌟 Improved version (may require payment)"
+        }
+        
+        st.markdown(f'<div class="model-info">💡 {model_info[model_choice]}</div>', unsafe_allow_html=True)
     
     with col2:
+        st.markdown("### 💡 Prompt Tips")
         st.markdown("""
-        **Tips for best results:**
-        - Be specific and descriptive
-        - Include style references
-        - Mention composition details
-        - Specify lighting and mood
+        **Be specific about:**
+        - Style (fantasy, realistic, anime)
+        - Lighting (sunset, dramatic, soft)
+        - Composition (close-up, landscape)
+        - Mood (epic, serene, mysterious)
         
-        **Example:**
-        "A majestic dragon flying over misty mountains at sunset, fantasy art style"
+        **Better:**
+        "Epic dragon flying over misty mountains at golden hour, fantasy art, highly detailed"
+        
+        **Avoid:**
+        "A dragon" (too vague)
         """)
     
     # Generate button
@@ -246,14 +263,14 @@ with st.container():
         elif not current_token:
             st.error("No Hugging Face token configured. Please add HF_TOKEN to Streamlit secrets.")
         else:
-            with st.spinner("🔄 Generating your image... This may take 20-30 seconds."):
-                generated_image, message = generate_image_huggingface(prompt, current_token)
+            with st.spinner(f"🔄 Generating your image using {model_choice}... This may take 30-60 seconds."):
+                generated_image, message = generate_image_huggingface(prompt, current_token, model_choice)
                 
                 if generated_image:
                     st.markdown('<div class="success-box">✅ Image generated successfully!</div>', unsafe_allow_html=True)
                     
                     # Display image
-                    st.image(generated_image, use_container_width=True)
+                    st.image(generated_image, use_container_width=True, caption=f"Generated with: {model_choice}")
                     
                     # Download button
                     buf = io.BytesIO()
@@ -261,12 +278,26 @@ with st.container():
                     st.download_button(
                         label="📥 Download Image",
                         data=buf.getvalue(),
-                        file_name=f"ai_generated_{prompt[:20]}.png",
+                        file_name=f"ai_generated_{hash(prompt) % 10000}.png",
                         mime="image/png",
                         use_container_width=True
                     )
                 else:
-                    st.markdown(f'<div class="error-box">❌ {message}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
+                    
+                    # Show troubleshooting tips
+                    with st.expander("🔧 Troubleshooting Tips"):
+                        st.markdown("""
+                        **If you see access errors:**
+                        1. Try **OpenJourney** or **Analog Diffusion** models (they work better with free tokens)
+                        2. Some models require payment - check Hugging Face for pricing
+                        3. Wait a few minutes if you hit rate limits
+                        4. Try a simpler prompt
+                        
+                        **Best free models to try:**
+                        - `prompthero/openjourney` - Great for fantasy and artistic images
+                        - `wavymulder/Analog-Diffusion` - Film photography style
+                        """)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
