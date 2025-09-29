@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import os
 import time
+import base64
 
 # Page configuration
 st.set_page_config(
@@ -145,19 +146,19 @@ if st.button("Generate Image", key="generate"):
             success = False
             error_message = ""
 
-            # Try Hugging Face Inference API
+            # Try Hugging Face Inference API with a supported model
             for attempt in range(retries):
                 try:
+                    # Use a free model that works without specific providers
                     client = InferenceClient(
-                        provider="nebius",
                         token=os.getenv('HF_TOKEN', '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')
                     )
                     image = client.text_to_image(
                         prompt=prompt,
-                        model="stabilityai/stable-diffusion-xl-base-1.0",
-                        negative_prompt="low quality, blurry",
+                        model="runwayml/stable-diffusion-v1-5",  # Use a more widely supported model
+                        negative_prompt="low quality, blurry, distorted",
                         guidance_scale=7.5,
-                        num_inference_steps=50
+                        num_inference_steps=20  # Reduced for faster generation
                     )
                     
                     # Display image
@@ -184,44 +185,93 @@ if st.button("Generate Image", key="generate"):
                     st.error(f"Hugging Face API error: {error_message}")
                     break
 
-            # Fallback to Craiyon API if Hugging Face fails
+            # Fallback to alternative APIs if Hugging Face fails
             if not success:
-                st.warning("Hugging Face API failed, trying Craiyon API...")
-                try:
-                    craiyon_url = "https://api.craiyon.com/v1/draw"
-                    payload = {"prompt": prompt}
-                    response = requests.post(craiyon_url, json=payload)
-                    
-                    if not response.ok:
-                        st.error(f"Craiyon API error: {response.reason} (Status: {response.status_code})")
-                        st.stop()
-
-                    data = response.json()
-                    if "images" not in data or not data["images"]:
-                        st.error("Craiyon API returned no images")
-                        st.stop()
-
-                    # Craiyon returns base64 images; decode the first one
-                    from base64 import b64decode
-                    image_data = b64decode(data["images"][0]["base64"])
-                    image = Image.open(io.BytesIO(image_data))
-                    
-                    # Display image
-                    st.image(image, caption="Generated Image (Craiyon)", use_container_width=True)
-                    
-                    # Option to download image
-                    img_buffer = io.BytesIO()
-                    image.save(img_buffer, format="PNG")
-                    st.download_button(
-                        label="Download Image",
-                        data=img_buffer.getvalue(),
-                        file_name="generated_image.png",
-                        mime="image/png"
-                    )
+                st.warning("Hugging Face API failed, trying alternative APIs...")
                 
+                # Option 1: Try Prodia API (free alternative)
+                try:
+                    st.info("Trying Prodia API...")
+                    prodia_url = "https://api.prodia.com/v1/sd/generate"
+                    prodia_headers = {
+                        "Content-Type": "application/json"
+                    }
+                    prodia_data = {
+                        "prompt": prompt,
+                        "model": "sd_xl_base_1.0.safetensors [be9edd61]",
+                        "steps": 20,
+                        "cfg_scale": 7.5,
+                        "negative_prompt": "low quality, blurry"
+                    }
+                    
+                    response = requests.post(prodia_url, json=prodia_data, headers=prodia_headers)
+                    
+                    if response.status_code == 200:
+                        job_data = response.json()
+                        job_id = job_data.get('job')
+                        
+                        # Wait for generation to complete
+                        max_attempts = 30
+                        for i in range(max_attempts):
+                            job_response = requests.get(f"https://api.prodia.com/v1/job/{job_id}")
+                            if job_response.status_code == 200:
+                                job_result = job_response.json()
+                                if job_result.get('status') == 'succeeded':
+                                    image_url = job_result.get('imageUrl')
+                                    if image_url:
+                                        image_response = requests.get(image_url)
+                                        image = Image.open(io.BytesIO(image_response.content))
+                                        
+                                        # Display image
+                                        st.image(image, caption="Generated Image (Prodia)", use_container_width=True)
+                                        
+                                        # Option to download image
+                                        img_buffer = io.BytesIO()
+                                        image.save(img_buffer, format="PNG")
+                                        st.download_button(
+                                            label="Download Image",
+                                            data=img_buffer.getvalue(),
+                                            file_name="generated_image.png",
+                                            mime="image/png"
+                                        )
+                                        success = True
+                                        break
+                            time.sleep(1)
+                        
+                        if not success:
+                            st.error("Prodia API: Image generation timed out")
+                    
+                    else:
+                        st.error(f"Prodia API error: {response.status_code}")
+                        
                 except Exception as e:
-                    st.error(f"Craiyon API error: {str(e)}")
-                    st.stop()
+                    st.error(f"Prodia API error: {str(e)}")
+                
+                # Final fallback: Use a simple local simulation
+                if not success:
+                    st.warning("All APIs failed. Showing placeholder simulation.")
+                    # Create a simple placeholder image
+                    width, height = 512, 512
+                    placeholder = Image.new('RGB', (width, height), color='#1f2937')
+                    
+                    # Add some text to the placeholder
+                    from PIL import ImageDraw, ImageFont
+                    draw = ImageDraw.Draw(placeholder)
+                    try:
+                        font = ImageFont.load_default()
+                        text = f"Prompt: {prompt[:50]}..."
+                        bbox = draw.textbbox((0, 0), text, font=font)
+                        text_width = bbox[2] - bbox[0]
+                        text_height = bbox[3] - bbox[1]
+                        x = (width - text_width) // 2
+                        y = (height - text_height) // 2
+                        draw.text((x, y), text, fill='white', font=font)
+                    except:
+                        pass
+                    
+                    st.image(placeholder, caption="Placeholder (API Services Unavailable)", use_container_width=True)
+                    st.info("This is a placeholder. In a working setup, this would be your generated image.")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
