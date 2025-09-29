@@ -4,354 +4,267 @@ from PIL import Image
 import io
 import os
 import time
-import base64
-import json
 
 # Page configuration
 st.set_page_config(
-    page_title="Text-to-Image Generator",
+    page_title="AI Image Generator",
     page_icon="🖼️",
     layout="wide"
 )
 
-# Custom CSS for eye-catching UI
+# Custom CSS for professional UI
 st.markdown("""
     <style>
+        .main {
+            background: linear-gradient(135deg, #0f172a, #1e1b4b);
+        }
         .header {
             background: linear-gradient(135deg, #1e3a8a, #7c3aed);
             padding: 2rem;
             text-align: center;
             border-radius: 15px;
             margin-bottom: 2rem;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
         }
         .header h1 {
             color: #ffffff;
-            font-size: 2.8rem;
-            font-weight: 700;
+            font-size: 3rem;
+            font-weight: 800;
             margin-bottom: 0.5rem;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
         }
         .header p {
             color: #e0e7ff;
-            font-size: 1.3rem;
-            font-style: italic;
+            font-size: 1.2rem;
         }
-        .footer {
-            background: linear-gradient(135deg, #1e3a8a, #7c3aed);
-            padding: 1rem;
-            text-align: center;
-            border-radius: 15px;
-            margin-top: 2rem;
-            color: #e0e7ff;
-            font-size: 1rem;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        }
-        .sidebar .sidebar-content {
-            background: #111827;
-            padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-        }
-        .prompt-suggestion {
-            background: #1f2937;
-            padding: 0.8rem;
-            margin: 0.5rem 0;
-            border-radius: 8px;
-            color: #a5b4fc;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-left: 4px solid #7c3aed;
-        }
-        .prompt-suggestion:hover {
-            background: #4b5563;
-            transform: translateX(5px);
-            color: #ffffff;
-            border-left-color: #3b82f6;
-        }
-        .main-content {
+        .content-box {
             background: #1f2937;
             padding: 2rem;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            border: 1px solid #374151;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
         .stTextArea textarea {
             background: #374151;
             color: #ffffff;
-            border-radius: 8px;
-            border: 2px solid #7c3aed;
-            transition: border-color 0.3s ease;
-        }
-        .stTextArea textarea:focus {
-            border-color: #3b82f6;
+            border-radius: 10px;
+            border: 2px solid #4f46e5;
+            font-size: 1.1rem;
         }
         .stButton>button {
-            background: linear-gradient(135deg, #3b82f6, #7c3aed);
-            color: #ffffff;
-            border-radius: 8px;
-            padding: 0.5rem 1rem;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            font-size: 1.1rem;
             font-weight: 600;
+            border-radius: 10px;
+            width: 100%;
             transition: all 0.3s ease;
         }
         .stButton>button:hover {
-            background: linear-gradient(135deg, #2563eb, #6d28d9);
-            transform: scale(1.05);
+            background: linear-gradient(135deg, #4338ca, #6d28d9);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.4);
         }
         .success-box {
-            background: #065f46;
+            background: linear-gradient(135deg, #065f46, #047857);
             color: #d1fae5;
             padding: 1rem;
-            border-radius: 8px;
+            border-radius: 10px;
             margin: 1rem 0;
+            border-left: 5px solid #10b981;
+        }
+        .error-box {
+            background: linear-gradient(135deg, #7f1d1d, #991b1b);
+            color: #fecaca;
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            border-left: 5px solid #ef4444;
+        }
+        .info-box {
+            background: linear-gradient(135deg, #1e3a8a, #3730a3);
+            color: #dbeafe;
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            border-left: 5px solid #4f46e5;
         }
     </style>
 """, unsafe_allow_html=True)
 
-def generate_with_huggingface(prompt):
-    """Generate image using Hugging Face Inference API"""
+def generate_image_huggingface(prompt):
+    """
+    Generate image using Hugging Face Inference API
+    Returns PIL Image if successful, None otherwise
+    """
     try:
-        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-        headers = {"Authorization": f"Bearer {os.getenv('HF_TOKEN', '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')}"}
+        # Your Hugging Face token from Streamlit secrets
+        HF_TOKEN = os.getenv('HF_TOKEN', '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')
         
+        # API endpoint for Stable Diffusion
+        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        
+        # Payload for the API request
         payload = {
             "inputs": prompt,
+            "options": {
+                "wait_for_model": True,
+                "use_cache": True
+            },
             "parameters": {
-                "num_inference_steps": 20,
-                "guidance_scale": 7.5
+                "num_inference_steps": 25,
+                "guidance_scale": 7.5,
+                "width": 512,
+                "height": 512
             }
         }
         
-        response = requests.post(API_URL, headers=headers, json=payload)
+        # Make the API request with timeout
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
         
+        # Check response status
         if response.status_code == 200:
             return Image.open(io.BytesIO(response.content))
+        
         elif response.status_code == 503:
-            # Model is loading, get estimated time
-            est_time = response.json().get('estimated_time', 30)
-            st.info(f"Model is loading. Please wait about {int(est_time)} seconds and try again.")
-            return None
-        else:
-            st.error(f"Hugging Face API error: {response.status_code}")
+            # Model is loading
+            error_data = response.json()
+            estimated_time = error_data.get('estimated_time', 30)
+            st.error(f"🔄 Model is loading. Please wait {int(estimated_time)} seconds and try again.")
             return None
             
+        elif response.status_code == 403:
+            st.error("🔐 Access denied. Please check your Hugging Face token.")
+            return None
+            
+        elif response.status_code == 429:
+            st.error("⏳ Rate limit exceeded. Please wait a few minutes before trying again.")
+            return None
+            
+        else:
+            st.error(f"❌ API Error {response.status_code}: {response.text}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        st.error("⏰ Request timeout. The model is taking too long to respond.")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("🌐 Connection error. Please check your internet connection.")
+        return None
     except Exception as e:
-        st.error(f"Hugging Face API error: {str(e)}")
+        st.error(f"⚠️ Unexpected error: {str(e)}")
         return None
 
-def generate_with_fal_ai(prompt):
-    """Generate image using Fal AI (free tier available)"""
-    try:
-        # Fal AI offers free credits
-        API_URL = "https://queue.fal.run/fal-ai/fast-sdxl/generate"
-        headers = {
-            "Authorization": f"Key {os.getenv('FAL_KEY', '')}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "prompt": prompt,
-            "image_size": "square_hd"
-        }
-        
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            image_url = result.get('images', [{}])[0].get('url')
-            if image_url:
-                image_response = requests.get(image_url)
-                return Image.open(io.BytesIO(image_response.content))
-        return None
-        
-    except Exception as e:
-        st.error(f"Fal AI API error: {str(e)}")
-        return None
-
-def generate_with_black_forest(prompt):
-    """Generate image using Black Forest Labs API"""
-    try:
-        API_URL = "https://api.blackforestlabs.ai/v1/image/generation"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "prompt": prompt,
-            "model": "flux-schnell",
-            "width": 512,
-            "height": 512,
-            "steps": 20
-        }
-        
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            image_data = result.get('data', [{}])[0].get('url')
-            if image_data:
-                image_response = requests.get(image_data)
-                return Image.open(io.BytesIO(image_response.content))
-        return None
-        
-    except Exception as e:
-        return None
-
-def create_placeholder_image(prompt):
-    """Create a placeholder image when APIs fail"""
+def create_placeholder(prompt):
+    """Create a professional placeholder image"""
     width, height = 512, 512
-    placeholder = Image.new('RGB', (width, height), color='#1f2937')
-    
-    # Add some text to the placeholder
-    from PIL import ImageDraw, ImageFont
-    draw = ImageDraw.Draw(placeholder)
-    
-    try:
-        # Try to use a larger font
-        font = ImageFont.load_default()
-        text = f"Prompt: {prompt[:40]}..." if len(prompt) > 40 else f"Prompt: {prompt}"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = (width - text_width) // 2
-        y = (height - text_height) // 2
-        
-        draw.text((x, y), text, fill='white', font=font)
-        draw.text((x, y + text_height + 10), "API Services Currently Unavailable", fill='#a5b4fc', font=font)
-        
-    except Exception:
-        # Fallback if font loading fails
-        pass
-    
-    return placeholder
+    img = Image.new('RGB', (width, height), color='#1f2937')
+    return img
 
-# Sidebar
-with st.sidebar:
-    st.markdown("""
-        <div class="sidebar-content">
-            <h3 style="color: #a5b4fc;">Prompt Suggestions</h3>
-            <div class="prompt-suggestion" onclick="document.getElementById('prompt').value='A futuristic cityscape at night with neon lights, cyberpunk style'">Futuristic cityscape, cyberpunk</div>
-            <div class="prompt-suggestion" onclick="document.getElementById('prompt').value='A serene forest at dawn, photorealistic style'">Serene forest at dawn</div>
-            <div class="prompt-suggestion" onclick="document.getElementById('prompt').value='A majestic dragon flying over mountains, fantasy art'">Dragon over mountains, fantasy</div>
-            <hr style="border-color: #4b5563;">
-            <h3 style="color: #a5b4fc;">Tips for Better Prompts</h3>
-            <ul style="color: #d1d5db;">
-                <li>Be specific with styles (e.g., photorealistic, anime).</li>
-                <li>Include details like colors or lighting.</li>
-                <li>Avoid vague terms for clearer results.</li>
-            </ul>
-            <hr style="border-color: #4b5563;">
-            <h3 style="color: #a5b4fc;">API Status</h3>
-            <p style="color: #d1d5db; font-size: 0.9rem;">
-                Using free AI APIs that may have rate limits.
-            </p>
-            <p style="color: #e0e7ff; font-size: 0.9rem; text-align: center;">
-                <strong>Muhammad Awais Laal</strong>, Gen AI Developer
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-
-# Header
+# Header Section
 st.markdown("""
     <div class="header">
-        <h1>Text-to-Image Generator</h1>
-        <p>Transform your imagination into stunning visuals with AI-powered image generation.</p>
+        <h1>AI Image Generator</h1>
+        <p>Transform your ideas into stunning visual art</p>
     </div>
 """, unsafe_allow_html=True)
 
-# Main content
-st.markdown('<div class="main-content">', unsafe_allow_html=True)
-st.subheader("Create Your Image")
-prompt = st.text_area("Prompt", placeholder="e.g., Astronaut riding a horse, photorealistic style", height=100, key="prompt")
-
-# Add image style selection
-col1, col2 = st.columns(2)
-with col1:
-    style = st.selectbox(
-        "Image Style",
-        ["Realistic", "Fantasy", "Anime", "Cyberpunk", "Oil Painting", "Watercolor"]
-    )
-with col2:
-    quality = st.selectbox(
-        "Quality",
-        ["Standard", "High Quality", "Fast"]
-    )
-
-# Button to generate image
-if st.button("Generate Image", key="generate"):
-    if not prompt.strip():
-        st.error("Please enter a prompt!")
-    else:
-        with st.spinner("Generating image... This may take 10-30 seconds."):
-            generated_image = None
-            api_used = ""
-            
-            # Add style to prompt
-            enhanced_prompt = f"{prompt}, {style.lower()} style, high quality"
-            
-            # Try different APIs in sequence
-            st.info("Trying Hugging Face API...")
-            generated_image = generate_with_huggingface(enhanced_prompt)
-            
-            if generated_image:
-                api_used = "Hugging Face"
-            else:
-                st.info("Trying alternative APIs...")
-                generated_image = generate_with_fal_ai(enhanced_prompt)
-                if generated_image:
-                    api_used = "Fal AI"
-                else:
-                    generated_image = generate_with_black_forest(enhanced_prompt)
-                    if generated_image:
-                        api_used = "Black Forest Labs"
-            
-            # Display result
-            if generated_image:
-                st.markdown(f'<div class="success-box">✅ Image generated successfully using {api_used} API!</div>', unsafe_allow_html=True)
-                st.image(generated_image, caption=f"Generated Image - '{prompt}'", use_container_width=True)
-                
-                # Download button
-                img_buffer = io.BytesIO()
-                generated_image.save(img_buffer, format="PNG")
-                st.download_button(
-                    label="📥 Download Image",
-                    data=img_buffer.getvalue(),
-                    file_name=f"generated_image_{hash(prompt) % 10000}.png",
-                    mime="image/png",
-                    key="download"
-                )
-            else:
-                st.warning("All AI APIs are currently unavailable. Showing placeholder.")
-                placeholder = create_placeholder_image(prompt)
-                st.image(placeholder, caption="Placeholder - AI Services Currently Unavailable", use_container_width=True)
-                
-                st.info("""
-                **Troubleshooting Tips:**
-                - Check your internet connection
-                - The free APIs might be experiencing high load
-                - Try again in a few minutes
-                - For consistent results, consider using a paid API service
-                """)
-
-# Add some usage tips
-with st.expander("💡 Usage Tips"):
-    st.markdown("""
-    **For best results:**
-    - Be descriptive in your prompts
-    - Include style keywords (photorealistic, anime, oil painting, etc.)
-    - Specify lighting and mood (sunset, dramatic lighting, etc.)
-    - Mention important details (colors, composition, etc.)
+# Main Content
+with st.container():
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
     
-    **Example prompts:**
-    - "A majestic dragon flying over misty mountains at sunset, fantasy art style"
-    - "Cyberpunk cityscape with neon lights and flying cars, detailed"
-    - "Portrait of a warrior with armor, photorealistic, dramatic lighting"
-    """)
-
-st.markdown('</div>', unsafe_allow_html=True)
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Create Your Image")
+        prompt = st.text_area(
+            "Enter your prompt:",
+            placeholder="Describe the image you want to generate...",
+            height=120,
+            key="prompt"
+        )
+        
+        # Advanced options
+        with st.expander("Advanced Settings"):
+            model_choice = st.selectbox(
+                "Model",
+                ["runwayml/stable-diffusion-v1-5", "stabilityai/stable-diffusion-2-1"],
+                help="Choose the AI model for image generation"
+            )
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                steps = st.slider("Inference Steps", 10, 50, 25)
+            with col_b:
+                guidance = st.slider("Guidance Scale", 5.0, 15.0, 7.5)
+    
+    with col2:
+        st.subheader("Guide")
+        st.markdown("""
+        **Tips for best results:**
+        - Be specific and descriptive
+        - Include style references
+        - Mention composition details
+        - Specify lighting and mood
+        """)
+        
+        st.markdown("""
+        **Example prompts:**
+        - Photorealistic portrait of a wise old wizard
+        - Cyberpunk cityscape at night with neon lights
+        - Serene mountain landscape at sunrise
+        """)
+    
+    # Generate button
+    if st.button("🚀 Generate Image", use_container_width=True):
+        if not prompt.strip():
+            st.error("Please enter a prompt to generate an image.")
+        else:
+            with st.spinner("🔄 Generating your image... This may take 20-30 seconds."):
+                # Update payload with advanced settings
+                generated_image = generate_image_huggingface(prompt)
+                
+                if generated_image:
+                    st.markdown('<div class="success-box">✅ Image generated successfully!</div>', unsafe_allow_html=True)
+                    
+                    # Display image
+                    st.image(generated_image, use_container_width=True)
+                    
+                    # Download button
+                    buf = io.BytesIO()
+                    generated_image.save(buf, format="PNG")
+                    st.download_button(
+                        label="📥 Download Image",
+                        data=buf.getvalue(),
+                        file_name=f"ai_generated_{prompt[:20]}.png",
+                        mime="image/png",
+                        use_container_width=True
+                    )
+                else:
+                    st.markdown('<div class="error-box">❌ Failed to generate image. Please try again.</div>', unsafe_allow_html=True)
+                    
+                    # Show placeholder
+                    placeholder = create_placeholder(prompt)
+                    st.image(placeholder, use_container_width=True)
+                    
+                    # Troubleshooting guide
+                    with st.expander("Troubleshooting Guide"):
+                        st.markdown("""
+                        **Common solutions:**
+                        1. Check your Hugging Face token is valid
+                        2. Ensure you have internet connection
+                        3. Try a different prompt
+                        4. Wait a few minutes if rate limited
+                        5. Contact support if issue persists
+                        """)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
-    <div class="footer">
-        <p>Developed by Muhammad Awais Laal | 2025 | AI Image Generation Demo</p>
+    <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
+        <p>Powered by Hugging Face AI Models | Professional Image Generation</p>
     </div>
 """, unsafe_allow_html=True)
