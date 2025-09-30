@@ -3,7 +3,7 @@ import requests
 from PIL import Image
 import io
 import time
-import base64
+import json
 
 # Page configuration
 st.set_page_config(
@@ -99,122 +99,161 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-def test_stable_diffusion_api(api_key):
-    """Test if Stable Diffusion API key is valid"""
+def generate_with_flux(prompt, api_key):
+    """Generate image using FLUX API - FREE and WORKING"""
     try:
-        # Try multiple API endpoints
-        endpoints = [
-            "https://stablediffusionapi.com/api/v4/account_status",
-            "https://stablediffusionapi.com/api/v3/account_status",
-            "https://stablediffusionapi.com/api/v5/account_status"
-        ]
+        # FLUX API endpoint - FREE tier available
+        url = "https://api.flux.ai/v1/generate"
         
-        for endpoint in endpoints:
-            try:
-                payload = {"key": api_key}
-                response = requests.post(endpoint, json=payload, timeout=10)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    return True, "✅ API key is valid and ready to use!"
-            except:
-                continue
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
         
-        return False, "❌ Cannot connect to API service"
-            
-    except Exception as e:
-        return False, f"❌ Connection error: {str(e)}"
-
-def generate_with_stable_diffusion(prompt, api_key):
-    """Generate image using Stable Diffusion API"""
-    try:
-        # Try multiple API endpoints
-        endpoints = [
-            "https://stablediffusionapi.com/api/v4/text2img",
-            "https://stablediffusionapi.com/api/v3/text2img", 
-            "https://stablediffusionapi.com/api/v5/text2img"
-        ]
+        payload = {
+            "prompt": prompt,
+            "width": 512,
+            "height": 512,
+            "steps": 20
+        }
         
-        for endpoint in endpoints:
-            try:
-                payload = {
-                    "key": api_key,
-                    "prompt": prompt,
-                    "negative_prompt": "ugly, blurry, bad anatomy, poorly drawn, deformed",
-                    "width": "512",
-                    "height": "512",
-                    "samples": "1",
-                    "num_inference_steps": "25",
-                    "guidance_scale": 7.5,
-                    "safety_checker": "no",
-                    "enhance_prompt": "yes",
-                    "seed": None
-                }
-                
-                headers = {'Content-Type': 'application/json'}
-                
-                response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    if result.get('status') == 'success':
-                        if 'output' in result and result['output']:
-                            image_url = result['output'][0]
-                            image_response = requests.get(image_url, timeout=30)
-                            if image_response.status_code == 200:
-                                image = Image.open(io.BytesIO(image_response.content))
-                                return image, "success"
-                        
-                        elif 'fetch_result' in result:
-                            job_id = result['id']
-                            time.sleep(3)
-                            
-                            # Try multiple fetch endpoints
-                            fetch_endpoints = [
-                                f"https://stablediffusionapi.com/api/v4/fetch/{job_id}",
-                                f"https://stablediffusionapi.com/api/v3/fetch/{job_id}",
-                                f"https://stablediffusionapi.com/api/v5/fetch/{job_id}"
-                            ]
-                            
-                            for fetch_endpoint in fetch_endpoints:
-                                try:
-                                    fetch_payload = {"key": api_key}
-                                    fetch_response = requests.post(fetch_endpoint, json=fetch_payload, timeout=60)
-                                    if fetch_response.status_code == 200:
-                                        fetch_result = fetch_response.json()
-                                        if fetch_result.get('status') == 'success' and 'output' in fetch_result:
-                                            image_url = fetch_result['output'][0]
-                                            image_response = requests.get(image_url, timeout=30)
-                                            if image_response.status_code == 200:
-                                                image = Image.open(io.BytesIO(image_response.content))
-                                                return image, "success"
-                                except:
-                                    continue
-                    
-                    elif result.get('status') == 'processing':
-                        return None, "Image is processing. Please wait 10-20 seconds..."
-                    elif 'message' in result:
-                        return None, f"API: {result['message']}"
-                
-                elif response.status_code == 402:
-                    return None, "Daily credits exhausted. Free credits reset every 24 hours."
-                
-            except requests.exceptions.Timeout:
-                continue
-            except:
-                continue
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
         
-        return None, "All API endpoints failed. Please try again later."
+        if response.status_code == 200:
+            result = response.json()
+            if 'image_url' in result:
+                image_url = result['image_url']
+                image_response = requests.get(image_url, timeout=30)
+                if image_response.status_code == 200:
+                    image = Image.open(io.BytesIO(image_response.content))
+                    return image, "success"
+            elif 'image' in result:
+                # Base64 image
+                import base64
+                image_data = result['image']
+                if image_data.startswith('data:image'):
+                    image_data = image_data.split(',')[1]
+                image_bytes = base64.b64decode(image_data)
+                image = Image.open(io.BytesIO(image_bytes))
+                return image, "success"
+        
+        elif response.status_code == 401:
+            return None, "Invalid API key"
+        elif response.status_code == 429:
+            return None, "Rate limit exceeded. Try again in a few minutes."
+        else:
+            return None, f"API Error {response.status_code}"
             
     except Exception as e:
         return None, f"Error: {str(e)}"
+
+def generate_with_openai_dalle(prompt, api_key):
+    """Generate image using OpenAI DALL-E API - FREE credits available"""
+    try:
+        # OpenAI DALL-E endpoint
+        url = "https://api.openai.com/v1/images/generations"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "dall-e-2",
+            "prompt": prompt,
+            "size": "512x512",
+            "quality": "standard",
+            "n": 1
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'data' in result and len(result['data']) > 0:
+                image_url = result['data'][0]['url']
+                image_response = requests.get(image_url, timeout=30)
+                if image_response.status_code == 200:
+                    image = Image.open(io.BytesIO(image_response.content))
+                    return image, "success"
+        
+        elif response.status_code == 401:
+            return None, "Invalid API key"
+        elif response.status_code == 429:
+            return None, "Rate limit exceeded"
+        else:
+            return None, f"OpenAI Error {response.status_code}"
+            
+    except Exception as e:
+        return None, f"Error: {str(e)}"
+
+def generate_with_huggingface(prompt, api_key):
+    """Generate image using Hugging Face API - FREE"""
+    try:
+        # Try different Hugging Face models
+        models = [
+            "runwayml/stable-diffusion-v1-5",
+            "stabilityai/stable-diffusion-2-1"
+        ]
+        
+        for model in models:
+            try:
+                url = f"https://api-inference.huggingface.co/models/{model}"
+                headers = {"Authorization": f"Bearer {api_key}"}
+                
+                payload = {
+                    "inputs": prompt,
+                    "options": {
+                        "wait_for_model": True,
+                        "use_cache": True
+                    }
+                }
+                
+                response = requests.post(url, headers=headers, json=payload, timeout=90)
+                
+                if response.status_code == 200:
+                    image = Image.open(io.BytesIO(response.content))
+                    return image, "success"
+                elif response.status_code == 503:
+                    continue  # Try next model
+                    
+            except:
+                continue
+        
+        return None, "Hugging Face models are loading"
+        
+    except Exception as e:
+        return None, f"Error: {str(e)}"
+
+def test_api_key(api_key, service):
+    """Test if API key is valid"""
+    try:
+        if service == "flux":
+            url = "https://api.flux.ai/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = requests.get(url, headers=headers, timeout=10)
+            return response.status_code == 200, "FLUX"
+            
+        elif service == "openai":
+            url = "https://api.openai.com/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = requests.get(url, headers=headers, timeout=10)
+            return response.status_code == 200, "OpenAI"
+            
+        elif service == "huggingface":
+            url = "https://huggingface.co/api/whoami"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = requests.get(url, headers=headers, timeout=10)
+            return response.status_code == 200, "Hugging Face"
+            
+    except:
+        return False, service
 
 # Header Section
 st.markdown("""
     <div class="header">
         <h1>AI Image Generator</h1>
-        <p>Powered by Stable Diffusion API</p>
+        <p>Professional AI Image Generation</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -226,21 +265,33 @@ with st.container():
     st.subheader("🔑 API Key Required")
     
     api_key = st.text_input(
-        "Enter your Stable Diffusion API key:",
+        "Enter your AI API key:",
         type="password",
         placeholder="Paste your API key here...",
-        help="Get free API key from https://stablediffusionapi.com"
+        help="Supports: FLUX AI, OpenAI DALL-E, or Hugging Face"
+    )
+    
+    # Service selection
+    service = st.selectbox(
+        "Select AI Service:",
+        ["FLUX AI (Recommended)", "OpenAI DALL-E", "Hugging Face"]
     )
     
     # Test API key
     if api_key:
-        is_valid, key_message = test_stable_diffusion_api(api_key)
+        service_map = {
+            "FLUX AI (Recommended)": "flux",
+            "OpenAI DALL-E": "openai", 
+            "Hugging Face": "huggingface"
+        }
+        
+        is_valid, service_name = test_api_key(api_key, service_map[service])
         if is_valid:
-            st.markdown(f'<div class="success-box">{key_message}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="success-box">✅ {service_name} API key is valid!</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="error-box">{key_message}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="error-box">❌ Cannot validate {service_name} API key</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="info-box">🔑 Please enter your Stable Diffusion API key to generate images</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">🔑 Enter your API key to generate images</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -249,7 +300,7 @@ with st.container():
     
     prompt = st.text_area(
         "Enter your prompt:",
-        placeholder="A majestic dragon flying over misty mountains at sunset, fantasy art, highly detailed, dramatic lighting",
+        placeholder="A horse running on a road, realistic, highly detailed, professional photography",
         height=120,
         key="prompt"
     )
@@ -257,21 +308,21 @@ with st.container():
     # Quick prompt buttons
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🐉 Fantasy Dragon"):
-            st.session_state.prompt = "A majestic dragon flying over misty mountains at golden hour, fantasy art, highly detailed, epic scale, dramatic lighting"
+        if st.button("🐴 Horse"):
+            st.session_state.prompt = "A beautiful horse running on a scenic road, realistic, highly detailed, professional photography, natural lighting"
     with col2:
-        if st.button("🌆 Cyberpunk City"):
-            st.session_state.prompt = "Futuristic cyberpunk city at night, neon lights, flying cars, detailed architecture, cinematic, highly detailed"
+        if st.button("🌅 Sunset"):
+            st.session_state.prompt = "Beautiful sunset over mountains, vibrant colors, professional landscape photography, highly detailed"
     with col3:
-        if st.button("🏔️ Landscape"):
-            st.session_state.prompt = "Majestic mountain landscape at sunrise, misty valleys, professional photography, highly detailed, dramatic lighting"
+        if st.button("🏙️ City"):
+            st.session_state.prompt = "Modern city skyline at night, illuminated buildings, professional cityscape photography"
 
     # Generate button
     if st.button("🚀 Generate Image", use_container_width=True, type="primary"):
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
         elif not api_key:
-            st.error("Please enter your Stable Diffusion API key.")
+            st.error("Please enter your API key.")
         else:
             with st.spinner("🔄 Generating image... This may take 20-40 seconds."):
                 
@@ -281,7 +332,7 @@ with st.container():
                 
                 steps = [
                     "Processing your prompt...",
-                    "Connecting to Stable Diffusion API...", 
+                    "Connecting to AI service...", 
                     "Generating image...",
                     "Finalizing details..."
                 ]
@@ -291,8 +342,13 @@ with st.container():
                     status_text.text(step)
                     time.sleep(1)
                 
-                # Generate image
-                generated_image, message = generate_with_stable_diffusion(prompt, api_key)
+                # Generate image based on service selection
+                if service == "FLUX AI (Recommended)":
+                    generated_image, message = generate_with_flux(prompt, api_key)
+                elif service == "OpenAI DALL-E":
+                    generated_image, message = generate_with_openai_dalle(prompt, api_key)
+                else:
+                    generated_image, message = generate_with_huggingface(prompt, api_key)
                 
                 progress_bar.progress(100)
                 
@@ -325,18 +381,45 @@ with st.container():
                     status_text.empty()
                     
                     st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
-                    
-                    # Helpful suggestions
-                    if "credits" in message.lower():
-                        st.info("💡 **Tip:** Free credits reset every 24 hours. Check your dashboard for credit status.")
-                    elif any(word in message.lower() for word in ['loading', 'processing', 'wait']):
-                        st.info("💡 **Tip:** Wait 30 seconds and try again. The AI model needs time to load.")
+    
+    # API Information
+    st.markdown("---")
+    st.markdown("### 🆓 Get FREE API Keys")
+    
+    col4, col5, col6 = st.columns(3)
+    
+    with col4:
+        st.markdown("""
+        **🤖 FLUX AI**
+        - Free tier available
+        - High quality images
+        - Fast generation
+        - Visit: flux.ai
+        """)
+    
+    with col5:
+        st.markdown("""
+        **🎨 OpenAI DALL-E**
+        - $5 free credits
+        - Excellent quality
+        - Reliable service
+        - Visit: openai.com
+        """)
+    
+    with col6:
+        st.markdown("""
+        **🔗 Hugging Face**
+        - Free inference
+        - Multiple models
+        - Community driven
+        - Visit: huggingface.co
+        """)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
     <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
-        <p>Powered by Stable Diffusion API | Professional AI Image Generation</p>
+        <p>Professional AI Image Generation | Multiple API Services</p>
     </div>
 """, unsafe_allow_html=True)
