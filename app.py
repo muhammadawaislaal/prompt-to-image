@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 from PIL import Image
 import io
-import os
 import time
 
 # Page configuration
@@ -82,110 +81,63 @@ st.markdown("""
             margin: 1rem 0;
             border-left: 5px solid #ef4444;
         }
-        .warning-box {
-            background: linear-gradient(135deg, #78350f, #92400e);
-            color: #fef3c7;
+        .info-box {
+            background: linear-gradient(135deg, #1e3a8a, #3730a3);
+            color: #dbeafe;
             padding: 1rem;
             border-radius: 10px;
             margin: 1rem 0;
-            border-left: 5px solid #f59e0b;
+            border-left: 5px solid #4f46e5;
         }
     </style>
 """, unsafe_allow_html=True)
 
-def test_huggingface_token(token):
-    """Test if Hugging Face token is valid"""
+def generate_ai_image(prompt):
+    """Generate image using free Hugging Face inference"""
     try:
-        test_url = "https://huggingface.co/api/whoami"
-        headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(test_url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            user_info = response.json()
-            return True, f"✅ Token valid - Welcome {user_info.get('name', 'User')}"
-        elif response.status_code == 401:
-            return False, "❌ Invalid token - Please check your token"
-        else:
-            return False, f"❌ Error {response.status_code}"
-            
-    except Exception as e:
-        return False, f"❌ Connection error"
-
-def generate_with_huggingface_free(prompt):
-    """Generate image using Hugging Face FREE inference without token"""
-    try:
-        # Use models that work without authentication
-        models = [
+        # List of free models that work without authentication
+        free_models = [
             "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-            "https://api-inference.huggingface.co/models/prompthero/openjourney-v4"
+            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1", 
+            "https://api-inference.huggingface.co/models/prompthero/openjourney-v4",
+            "https://api-inference.huggingface.co/models/wavymulder/Analog-Diffusion"
         ]
         
-        for model_url in models:
+        for model_url in free_models:
             try:
-                headers = {}
                 payload = {
                     "inputs": prompt,
                     "options": {
                         "wait_for_model": True,
-                        "use_cache": True
+                        "use_cache": False
                     }
                 }
                 
-                response = requests.post(model_url, headers=headers, json=payload, timeout=60)
+                response = requests.post(model_url, json=payload, timeout=90)
                 
                 if response.status_code == 200:
                     image = Image.open(io.BytesIO(response.content))
-                    return image, f"Success with {model_url.split('/')[-1]}"
+                    model_name = model_url.split('/')[-1]
+                    return image, f"Generated with {model_name}"
                 
                 elif response.status_code == 503:
-                    continue  # Try next model
+                    # Model is loading, try next one
+                    continue
                     
-            except:
-                continue  # Try next model
+            except Exception:
+                # Try next model if this one fails
+                continue
         
-        return None, "All models are currently loading or busy"
-            
+        return None, "All AI models are currently busy. Please wait 1-2 minutes and try again."
+        
     except Exception as e:
-        return None, f"Error: {str(e)}"
-
-def generate_with_huggingface_token(prompt, token):
-    """Generate image using Hugging Face with token"""
-    try:
-        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-        headers = {"Authorization": f"Bearer {token}"}
-        
-        payload = {
-            "inputs": prompt,
-            "options": {
-                "wait_for_model": True,
-                "use_cache": True
-            }
-        }
-        
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
-        
-        if response.status_code == 200:
-            image = Image.open(io.BytesIO(response.content))
-            return image, "success"
-        
-        elif response.status_code == 503:
-            return None, "Model is loading. Please wait 30-60 seconds and try again."
-        
-        elif response.status_code in [401, 403]:
-            return None, "Token doesn't have inference access"
-        
-        else:
-            return None, f"API Error {response.status_code}"
-            
-    except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, f"Generation error: {str(e)}"
 
 # Header Section
 st.markdown("""
     <div class="header">
         <h1>AI Image Generator</h1>
-        <p>Powered by Hugging Face AI Models</p>
+        <p>Create stunning images with AI - Completely Free</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -193,28 +145,18 @@ st.markdown("""
 with st.container():
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     
-    # Get Hugging Face token from secrets
-    HF_TOKEN = os.getenv('HF_TOKEN', '')
-    
-    # Check token status
-    if HF_TOKEN:
-        is_valid, token_message = test_huggingface_token(HF_TOKEN)
-        if is_valid:
-            st.markdown(f'<div class="success-box">{token_message}</div>', unsafe_allow_html=True)
-            use_token = True
-        else:
-            st.markdown(f'<div class="error-box">{token_message}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="warning-box">⚠️ Using free public inference instead</div>', unsafe_allow_html=True)
-            use_token = False
-    else:
-        st.markdown('<div class="warning-box">⚠️ No token found - Using free public inference</div>', unsafe_allow_html=True)
-        use_token = False
+    st.markdown("""
+    <div class="info-box">
+        <h3>🚀 Ready to Generate</h3>
+        <p>Enter your prompt below to create AI-generated images using free public models.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     st.subheader("Create Your Image")
     
     prompt = st.text_area(
         "Enter your prompt:",
-        placeholder="A majestic dragon flying over misty mountains at sunset, fantasy art, highly detailed",
+        placeholder="A majestic dragon flying over misty mountains at sunset, fantasy art, highly detailed, dramatic lighting",
         height=120,
         key="prompt"
     )
@@ -224,27 +166,27 @@ with st.container():
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
         else:
-            with st.spinner("Generating image... This may take 30-60 seconds."):
+            with st.spinner("🔄 Generating your image... This may take 30-60 seconds."):
                 
                 # Show progress
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                for i in range(4):
+                # Progress steps
+                steps = [
+                    "Processing your prompt...",
+                    "Connecting to AI service...", 
+                    "Generating image...",
+                    "Finalizing details..."
+                ]
+                
+                for i, step in enumerate(steps):
                     progress_bar.progress((i + 1) * 25)
-                    if i == 0:
-                        status_text.text("Processing your prompt...")
-                    elif i == 1:
-                        status_text.text("Connecting to AI service...")
-                    elif i == 2:
-                        status_text.text("Generating image...")
+                    status_text.text(step)
                     time.sleep(1)
                 
                 # Generate image
-                if use_token:
-                    generated_image, message = generate_with_huggingface_token(prompt, HF_TOKEN)
-                else:
-                    generated_image, message = generate_with_huggingface_free(prompt)
+                generated_image, message = generate_ai_image(prompt)
                 
                 progress_bar.progress(100)
                 
@@ -254,7 +196,7 @@ with st.container():
                     progress_bar.empty()
                     status_text.empty()
                     
-                    st.markdown('<div class="success-box">Image generated successfully!</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="success-box">🎉 Image generated successfully!</div>', unsafe_allow_html=True)
                     
                     # Display image
                     st.image(generated_image, use_container_width=True, caption=f"'{prompt}'")
@@ -271,22 +213,22 @@ with st.container():
                     )
                     
                 else:
-                    status_text.text("❌ Failed")
+                    status_text.text("❌ Generation failed")
                     time.sleep(1)
                     progress_bar.empty()
                     status_text.empty()
                     
                     st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
                     
-                    # Show retry suggestion
-                    if "loading" in message.lower():
-                        st.info("💡 **Tip:** Wait 30-60 seconds and try again. The AI model needs time to load.")
+                    # Retry suggestion
+                    if "busy" in message.lower():
+                        st.info("💡 **Tip:** Wait 1-2 minutes and try again. Free AI services can get busy during peak times.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
     <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
-        <p>AI Image Generation | Hugging Face Models</p>
+        <p>Powered by Hugging Face AI Models • Free Image Generation</p>
     </div>
 """, unsafe_allow_html=True)
