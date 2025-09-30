@@ -95,122 +95,145 @@ st.markdown("""
             margin: 1rem 0;
             border-left: 5px solid #4f46e5;
         }
-        .warning-box {
-            background: linear-gradient(135deg, #78350f, #92400e);
-            color: #fef3c7;
-            padding: 1rem;
-            border-radius: 10px;
-            margin: 1rem 0;
-            border-left: 5px solid #f59e0b;
-        }
     </style>
 """, unsafe_allow_html=True)
 
-def test_huggingface_token(token):
-    """Test if Hugging Face token is valid"""
+def test_stable_diffusion_api(api_key):
+    """Test if Stable Diffusion API key is valid"""
     try:
-        test_url = "https://huggingface.co/api/whoami"
-        headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(test_url, headers=headers, timeout=10)
+        url = "https://stablediffusionapi.com/api/v3/account"
+        payload = {"key": api_key}
+        response = requests.post(url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            user_info = response.json()
-            return True, f"✅ Token valid - Welcome {user_info.get('name', 'User')}"
-        elif response.status_code == 401:
-            return False, "❌ Invalid token"
+            result = response.json()
+            if 'credits' in result:
+                return True, f"✅ Valid - Credits: {result['credits']}"
+            else:
+                return False, "❌ Invalid API key"
         else:
-            return False, f"❌ Error {response.status_code}"
+            return False, f"❌ API error: {response.status_code}"
             
     except Exception as e:
         return False, f"❌ Connection error"
 
-def generate_with_huggingface(prompt, token):
-    """Generate image using Hugging Face Inference API with token"""
+def generate_with_stable_diffusion(prompt, api_key):
+    """Generate image using Stable Diffusion API"""
     try:
-        API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-        headers = {"Authorization": f"Bearer {token}"}
+        url = "https://stablediffusionapi.com/api/v3/text2img"
         
         payload = {
-            "inputs": prompt,
-            "parameters": {
-                "num_inference_steps": 25,
-                "guidance_scale": 7.5,
-                "width": 512,
-                "height": 512
-            },
-            "options": {
-                "wait_for_model": True,
-                "use_cache": True
-            }
+            "key": api_key,
+            "prompt": prompt,
+            "negative_prompt": "ugly, blurry, bad anatomy, poorly drawn",
+            "width": "512",
+            "height": "512",
+            "samples": "1",
+            "num_inference_steps": "20",
+            "guidance_scale": 7.5,
+            "safety_checker": "no",
+            "enhance_prompt": "yes",
+            "seed": None
         }
         
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
+        headers = {'Content-Type': 'application/json'}
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=120)
         
         if response.status_code == 200:
-            image = Image.open(io.BytesIO(response.content))
-            return image, "success"
+            result = response.json()
+            
+            if result.get('status') == 'success':
+                if 'output' in result and result['output']:
+                    image_url = result['output'][0]
+                    image_response = requests.get(image_url, timeout=30)
+                    if image_response.status_code == 200:
+                        image = Image.open(io.BytesIO(image_response.content))
+                        return image, "success"
+                
+                elif 'fetch_result' in result:
+                    job_id = result['id']
+                    time.sleep(5)
+                    
+                    fetch_url = f"https://stablediffusionapi.com/api/v3/fetch/{job_id}"
+                    fetch_payload = {"key": api_key}
+                    
+                    fetch_response = requests.post(fetch_url, json=fetch_payload, timeout=60)
+                    if fetch_response.status_code == 200:
+                        fetch_result = fetch_response.json()
+                        if fetch_result.get('status') == 'success' and 'output' in fetch_result:
+                            image_url = fetch_result['output'][0]
+                            image_response = requests.get(image_url, timeout=30)
+                            if image_response.status_code == 200:
+                                image = Image.open(io.BytesIO(image_response.content))
+                                return image, "success"
+            
+            elif result.get('status') == 'processing':
+                return None, "Image is processing. Please wait..."
+            elif 'message' in result:
+                return None, f"API: {result['message']}"
         
-        elif response.status_code == 503:
-            try:
-                error_data = response.json()
-                estimated_time = error_data.get('estimated_time', 30)
-                return None, f"Model loading. Wait {estimated_time:.0f} seconds"
-            except:
-                return None, "Model loading. Please wait"
-        
-        elif response.status_code in [401, 403]:
-            return None, "Token doesn't have inference access"
-        
+        elif response.status_code == 402:
+            return None, "Daily credits exhausted. Free credits reset every 24 hours."
         else:
             return None, f"API Error {response.status_code}"
             
-    except requests.exceptions.Timeout:
-        return None, "Request timeout"
     except Exception as e:
         return None, f"Error: {str(e)}"
 
-def generate_with_free_inference(prompt):
-    """Generate image using free public inference as fallback"""
+def generate_with_prodia(prompt):
+    """Generate image using Prodia API (no key required)"""
     try:
-        free_models = [
-            "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1",
-            "https://api-inference.huggingface.co/models/prompthero/openjourney-v4"
-        ]
+        generate_url = "https://api.prodia.com/v1/sd/generate"
+        generate_data = {
+            "prompt": prompt,
+            "model": "dreamshaper_8_93211.safetensors [bcaa7c82]",
+            "negative_prompt": "ugly, blurry, low quality",
+            "steps": 25,
+            "cfg_scale": 7.5,
+            "seed": -1
+        }
         
-        for model_url in free_models:
-            try:
-                payload = {
-                    "inputs": prompt,
-                    "options": {
-                        "wait_for_model": True,
-                        "use_cache": False
-                    }
-                }
+        generate_response = requests.post(generate_url, json=generate_data, timeout=30)
+        
+        if generate_response.status_code == 200:
+            job_data = generate_response.json()
+            job_id = job_data.get('job')
+            
+            max_attempts = 30
+            for attempt in range(max_attempts):
+                job_url = f"https://api.prodia.com/v1/job/{job_id}"
+                job_response = requests.get(job_url, timeout=30)
                 
-                response = requests.post(model_url, json=payload, timeout=90)
-                
-                if response.status_code == 200:
-                    image = Image.open(io.BytesIO(response.content))
-                    model_name = model_url.split('/')[-1]
-                    return image, f"Free model: {model_name}"
-                
-                elif response.status_code == 503:
-                    continue
+                if job_response.status_code == 200:
+                    job_result = job_response.json()
+                    status = job_result.get('status')
                     
-            except Exception:
-                continue
-        
-        return None, "All models are busy. Please try again later."
-        
+                    if status == 'succeeded':
+                        image_url = job_result.get('imageUrl')
+                        if image_url:
+                            image_response = requests.get(image_url, timeout=30)
+                            if image_response.status_code == 200:
+                                image = Image.open(io.BytesIO(image_response.content))
+                                return image, "success"
+                    
+                    elif status == 'failed':
+                        return None, "Generation failed"
+                
+                time.sleep(2)
+            
+            return None, "Generation timeout"
+        else:
+            return None, f"Prodia error: {generate_response.status_code}"
+            
     except Exception as e:
-        return None, f"Generation error: {str(e)}"
+        return None, f"Prodia error: {str(e)}"
 
 # Header Section
 st.markdown("""
     <div class="header">
         <h1>AI Image Generator</h1>
-        <p>Powered by Hugging Face AI</p>
+        <p>Free High-Quality Image Generation</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -218,29 +241,30 @@ st.markdown("""
 with st.container():
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     
-    # Hugging Face Token Input
-    st.subheader("🔑 Hugging Face Token")
+    # API Key Input Section
+    st.subheader("🔑 Free API Key")
     
-    hf_token = st.text_input(
-        "Enter your Hugging Face token:",
+    api_key = st.text_input(
+        "Enter your Stable Diffusion API key:",
         type="password",
-        placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx",
-        help="Get your free token from https://huggingface.co/settings/tokens"
+        placeholder="Your free API key from stablediffusionapi.com",
+        help="Get 100 free images daily from https://stablediffusionapi.com"
     )
     
-    # Test token if provided
-    if hf_token:
-        is_valid, token_message = test_huggingface_token(hf_token)
+    # Service selection
+    service = st.selectbox(
+        "Select AI Service:",
+        ["Stable Diffusion API", "Prodia API (No key needed)"],
+        help="Stable Diffusion: Higher quality, Prodia: No API key required"
+    )
+    
+    # Test API key if provided
+    if api_key and service == "Stable Diffusion API":
+        is_valid, key_message = test_stable_diffusion_api(api_key)
         if is_valid:
-            st.markdown(f'<div class="success-box">{token_message}</div>', unsafe_allow_html=True)
-            use_token = True
+            st.markdown(f'<div class="success-box">{key_message}</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="error-box">{token_message}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="warning-box">⚠️ Will use free public inference instead</div>', unsafe_allow_html=True)
-            use_token = False
-    else:
-        st.markdown('<div class="info-box">💡 Enter your Hugging Face token for better performance, or use free public inference</div>', unsafe_allow_html=True)
-        use_token = False
+            st.markdown(f'<div class="error-box">{key_message}</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -258,8 +282,10 @@ with st.container():
     if st.button("Generate Image", use_container_width=True, type="primary"):
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
+        elif service == "Stable Diffusion API" and not api_key:
+            st.error("Please enter your Stable Diffusion API key.")
         else:
-            with st.spinner("Generating image... This may take 30-60 seconds."):
+            with st.spinner("Generating image... This may take 20-40 seconds."):
                 
                 # Show progress
                 progress_bar = st.progress(0)
@@ -277,11 +303,11 @@ with st.container():
                     status_text.text(step)
                     time.sleep(1)
                 
-                # Generate image based on token availability
-                if use_token:
-                    generated_image, message = generate_with_huggingface(prompt, hf_token)
+                # Generate image based on service selection
+                if service == "Stable Diffusion API":
+                    generated_image, message = generate_with_stable_diffusion(prompt, api_key)
                 else:
-                    generated_image, message = generate_with_free_inference(prompt)
+                    generated_image, message = generate_with_prodia(prompt)
                 
                 progress_bar.progress(100)
                 
@@ -315,15 +341,17 @@ with st.container():
                     
                     st.markdown(f'<div class="error-box">{message}</div>', unsafe_allow_html=True)
                     
-                    # Retry suggestion
-                    if "loading" in message.lower() or "busy" in message.lower():
-                        st.info("💡 **Tip:** Wait 1-2 minutes and try again. AI models can take time to load.")
+                    # Helpful suggestions
+                    if "credits" in message.lower():
+                        st.info("💡 **Tip:** Free credits reset every 24 hours. Try Prodia API for unlimited free images.")
+                    elif "processing" in message.lower():
+                        st.info("💡 **Tip:** Wait 30 seconds and try again. The image is still processing.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
     <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
-        <p>AI Image Generation | Hugging Face Models</p>
+        <p>Free AI Image Generation | 100 Images Daily</p>
     </div>
 """, unsafe_allow_html=True)
