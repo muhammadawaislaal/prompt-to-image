@@ -3,6 +3,7 @@ import requests
 from PIL import Image
 import io
 import time
+import base64
 
 # Page configuration
 st.set_page_config(
@@ -101,39 +102,43 @@ st.markdown("""
 def test_stable_diffusion_api(api_key):
     """Test if Stable Diffusion API key is valid"""
     try:
-        url = "https://stablediffusionapi.com/api/v3/account"
+        # Updated API endpoint
+        url = "https://stablediffusionapi.com/api/v5/account_status"
         payload = {"key": api_key}
         response = requests.post(url, json=payload, timeout=10)
         
         if response.status_code == 200:
             result = response.json()
-            if 'credits' in result:
-                return True, f"✅ Valid - Credits: {result['credits']}"
+            if 'credits' in result or 'status' in result:
+                return True, "✅ API key is valid and ready to use!"
             else:
-                return False, "❌ Invalid API key"
+                return False, "❌ Invalid API key response"
         else:
             return False, f"❌ API error: {response.status_code}"
             
     except Exception as e:
-        return False, f"❌ Connection error"
+        return False, f"❌ Connection error: {str(e)}"
 
 def generate_with_stable_diffusion(prompt, api_key):
-    """Generate image using Stable Diffusion API"""
+    """Generate image using Stable Diffusion API with updated endpoints"""
     try:
-        url = "https://stablediffusionapi.com/api/v3/text2img"
+        # Updated API endpoint
+        url = "https://stablediffusionapi.com/api/v5/text2img"
         
         payload = {
             "key": api_key,
             "prompt": prompt,
-            "negative_prompt": "ugly, blurry, bad anatomy, poorly drawn",
+            "negative_prompt": "ugly, blurry, bad anatomy, poorly drawn, deformed",
             "width": "512",
             "height": "512",
             "samples": "1",
-            "num_inference_steps": "20",
+            "num_inference_steps": "25",
             "guidance_scale": 7.5,
             "safety_checker": "no",
             "enhance_prompt": "yes",
-            "seed": None
+            "seed": None,
+            "webhook": None,
+            "track_id": None
         }
         
         headers = {'Content-Type': 'application/json'}
@@ -153,9 +158,10 @@ def generate_with_stable_diffusion(prompt, api_key):
                 
                 elif 'fetch_result' in result:
                     job_id = result['id']
-                    time.sleep(5)
+                    time.sleep(3)
                     
-                    fetch_url = f"https://stablediffusionapi.com/api/v3/fetch/{job_id}"
+                    # Updated fetch endpoint
+                    fetch_url = f"https://stablediffusionapi.com/api/v5/fetch/{job_id}"
                     fetch_payload = {"key": api_key}
                     
                     fetch_response = requests.post(fetch_url, json=fetch_payload, timeout=60)
@@ -169,29 +175,34 @@ def generate_with_stable_diffusion(prompt, api_key):
                                 return image, "success"
             
             elif result.get('status') == 'processing':
-                return None, "Image is processing. Please wait..."
+                return None, "Image is processing. Please wait 10-20 seconds..."
             elif 'message' in result:
-                return None, f"API: {result['message']}"
+                return None, f"API Message: {result['message']}"
+            else:
+                return None, "Unknown API response"
         
         elif response.status_code == 402:
             return None, "Daily credits exhausted. Free credits reset every 24 hours."
+        elif response.status_code == 404:
+            return None, "API endpoint not found. Service may be updating."
         else:
-            return None, f"API Error {response.status_code}"
+            return None, f"API Error {response.status_code}: {response.text[:100]}"
             
     except Exception as e:
         return None, f"Error: {str(e)}"
 
 def generate_with_prodia(prompt):
-    """Generate image using Prodia API (no key required)"""
+    """Generate image using Prodia API (no key required) - RELIABLE"""
     try:
         generate_url = "https://api.prodia.com/v1/sd/generate"
         generate_data = {
             "prompt": prompt,
             "model": "dreamshaper_8_93211.safetensors [bcaa7c82]",
-            "negative_prompt": "ugly, blurry, low quality",
+            "negative_prompt": "ugly, blurry, low quality, poorly drawn, deformed",
             "steps": 25,
             "cfg_scale": 7.5,
-            "seed": -1
+            "seed": -1,
+            "upscale": False
         }
         
         generate_response = requests.post(generate_url, json=generate_data, timeout=30)
@@ -200,7 +211,8 @@ def generate_with_prodia(prompt):
             job_data = generate_response.json()
             job_id = job_data.get('job')
             
-            max_attempts = 30
+            # Wait for generation to complete
+            max_attempts = 40
             for attempt in range(max_attempts):
                 job_url = f"https://api.prodia.com/v1/job/{job_id}"
                 job_response = requests.get(job_url, timeout=30)
@@ -218,13 +230,13 @@ def generate_with_prodia(prompt):
                                 return image, "success"
                     
                     elif status == 'failed':
-                        return None, "Generation failed"
+                        return None, "Generation failed - try a different prompt"
                 
-                time.sleep(2)
+                time.sleep(1.5)  # Wait 1.5 seconds between checks
             
-            return None, "Generation timeout"
+            return None, "Generation timeout - try again"
         else:
-            return None, f"Prodia error: {generate_response.status_code}"
+            return None, f"Prodia API error: {generate_response.status_code}"
             
     except Exception as e:
         return None, f"Prodia error: {str(e)}"
@@ -247,18 +259,18 @@ with st.container():
     api_key = st.text_input(
         "Enter your Stable Diffusion API key:",
         type="password",
-        placeholder="Your free API key from stablediffusionapi.com",
-        help="Get 100 free images daily from https://stablediffusionapi.com"
+        placeholder="Paste your API key here...",
+        help="Get free API key from https://stablediffusionapi.com"
     )
     
-    # Service selection
+    # Service selection - Default to Prodia since it's more reliable
     service = st.selectbox(
         "Select AI Service:",
-        ["Stable Diffusion API", "Prodia API (No key needed)"],
-        help="Stable Diffusion: Higher quality, Prodia: No API key required"
+        ["Prodia API (Recommended - No key needed)", "Stable Diffusion API"],
+        help="Prodia: More reliable, no API key needed. Stable Diffusion: Higher quality but may have issues."
     )
     
-    # Test API key if provided
+    # Test API key if provided and selected
     if api_key and service == "Stable Diffusion API":
         is_valid, key_message = test_stable_diffusion_api(api_key)
         if is_valid:
@@ -278,14 +290,26 @@ with st.container():
         key="prompt"
     )
 
+    # Quick prompt buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🐉 Fantasy Dragon"):
+            st.session_state.prompt = "A majestic dragon flying over misty mountains at golden hour, fantasy art, highly detailed, epic scale, dramatic lighting"
+    with col2:
+        if st.button("🌆 Cyberpunk City"):
+            st.session_state.prompt = "Futuristic cyberpunk city at night, neon lights, flying cars, detailed architecture, cinematic, highly detailed"
+    with col3:
+        if st.button("🏔️ Landscape"):
+            st.session_state.prompt = "Majestic mountain landscape at sunrise, misty valleys, professional photography, highly detailed, dramatic lighting"
+
     # Generate button
-    if st.button("Generate Image", use_container_width=True, type="primary"):
+    if st.button("🚀 Generate Image", use_container_width=True, type="primary"):
         if not prompt.strip():
             st.error("Please enter a prompt to generate an image.")
         elif service == "Stable Diffusion API" and not api_key:
             st.error("Please enter your Stable Diffusion API key.")
         else:
-            with st.spinner("Generating image... This may take 20-40 seconds."):
+            with st.spinner("🔄 Generating image... This may take 20-40 seconds."):
                 
                 # Show progress
                 progress_bar = st.progress(0)
@@ -326,7 +350,7 @@ with st.container():
                     buf = io.BytesIO()
                     generated_image.save(buf, format="PNG", quality=95)
                     st.download_button(
-                        label="Download Image",
+                        label="📥 Download Image",
                         data=buf.getvalue(),
                         file_name=f"ai_image_{int(time.time())}.png",
                         mime="image/png",
@@ -344,14 +368,16 @@ with st.container():
                     # Helpful suggestions
                     if "credits" in message.lower():
                         st.info("💡 **Tip:** Free credits reset every 24 hours. Try Prodia API for unlimited free images.")
-                    elif "processing" in message.lower():
-                        st.info("💡 **Tip:** Wait 30 seconds and try again. The image is still processing.")
+                    elif any(word in message.lower() for word in ['loading', 'processing', 'wait']):
+                        st.info("💡 **Tip:** Wait 30 seconds and try again. The AI model needs time to load.")
+                    elif "404" in message:
+                        st.info("💡 **Tip:** API endpoint issue. Use 'Prodia API' which is more reliable.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
     <div style="text-align: center; color: #6b7280; margin-top: 3rem; padding: 1rem;">
-        <p>Free AI Image Generation | 100 Images Daily</p>
+        <p>Free AI Image Generation | Unlimited Images with Prodia API</p>
     </div>
 """, unsafe_allow_html=True)
